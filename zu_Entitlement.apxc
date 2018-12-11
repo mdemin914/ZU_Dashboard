@@ -1,0 +1,49 @@
+public class zu_Entitlement {
+    
+    public boolean processSubscriptionProductAndCharge(Id subProChrg_id){
+        try {
+            //read the SubscriptionProductAndCharge object from DB
+            Zuora__SubscriptionProductCharge__c subProChrg = [select Id, Name, Zuora__Account__c, Zuora__Subscription__c, Zuora__ProductName__c, Zuora__ProductSKU__c, Entitlement__c  from Zuora__SubscriptionProductCharge__c where Id = :subProChrg_id];
+            
+            //the subscriptions list below is needed to access the billingAccount of subProChrg
+            List<Zuora__Subscription__c> subscriptions = [select Id, Name, Zuora__Account__c, Zuora__CustomerAccount__c from Zuora__Subscription__c where Id = :subProChrg.Zuora__Subscription__c];
+            if (subscriptions.size()==0) {
+                System.debug('Failed to identify an existing subscription for the Subscription Product and Charge ' + subProChrg_id);
+                return false;}
+            
+            //the Product2 list below will include the Product2 mapped to the Zuora_Product selected in subProChrg
+            //using name and SKU as for mapping
+            List<Product2> products = [select Id, Name from Product2 where Name=:subProChrg.Zuora__ProductName__c and  zqu__SKU__c=:subProChrg.Zuora__ProductSKU__c];
+            if (products.size()==0) {
+                System.debug('Failed to identify a mapped Product2 for the Subscription Product and Charge ' + subProChrg_id);
+                return false;}
+            
+            //if there is an existing Parent Entitlment for the Billing Account and Product of subProChrg
+            List<Entitlement__c> existingEntitlements = [select Id, Name, Account__c, Billing_Account__c, Type__c, Product__c, Product__r.Name from Entitlement__c where Billing_Account__c = :subscriptions[0].Zuora__CustomerAccount__c and Parent__c=null and Product__c=:products[0].Id];
+            if (existingEntitlements.size()>0) {          
+                subProChrg.Entitlement__c = existingEntitlements[0].Id;
+                update existingEntitlements[0];
+                update subProChrg;
+                System.debug('The Subscription Product and Charge ' + subProChrg_id + ' has been added to an existing Entitlement ' + existingEntitlements[0].Id);
+                return true;
+            } else {
+                Entitlement__c zuEntitlement = new Entitlement__c();
+                zuEntitlement.Account__c = subscriptions[0].Zuora__Account__c;
+                zuEntitlement.Billing_Account__c = subscriptions[0].Zuora__CustomerAccount__c;
+                zuEntitlement.Product__c = products[0].Id;
+                zuEntitlement.Status__c ='New';
+                zuEntitlement.ProvisioningDate__c = Date.today();
+                insert zuEntitlement;
+                zuEntitlement = [select Id, Name, Account__c, Billing_Account__c, Type__c, Product__c, Product__r.Name from Entitlement__c where Id = :zuEntitlement.Id];
+                subProChrg.Entitlement__c = zuEntitlement.Id;
+                update subProChrg;
+                System.debug('The Subscription Product and Charge ' + subProChrg_id + ' has been added to a new Entitlement ' + zuEntitlement.Id);
+                return true;
+            }            
+        }
+        catch (Exception e) {
+            System.debug('An exception accoured: ' + e.getMessage());
+            return false;
+        }       
+    }
+}
